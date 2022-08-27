@@ -1,0 +1,11 @@
+syntax = "proto3";
+package random_ordinal_tree;
+
+message adj_list {
+  repeated int32 to = 1;
+}
+
+message ordinal_tree {
+  optional int32 n = 1;
+  repeated adj_list adj = 2;
+}

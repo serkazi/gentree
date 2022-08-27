@@ -1,0 +1,3 @@
+add_library(random_ordinal_tree rand_ordinal_tree_from_bps.cpp)
+target_link_libraries(random_ordinal_tree PUBLIC random_brack_seq graphs)
+target_include_directories(random_ordinal_tree PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
