@@ -17,7 +17,7 @@ std::string RandomBrackSeqImpl::explicit_stack_phi(const std::string &w) {
   while ( not ls.empty() ) {
     auto left= ls.top(), right= rs.top();
     ls.pop(), rs.pop();
-    std::int64_t partial_sum= 0,i,j,k,r= 0;
+    std::int64_t partial_sum= 0,i,r= 0;
     bool done= status.top(); status.pop();
     auto action= post_action.top(); post_action.pop();
     if ( done ) {

@@ -1,4 +1,5 @@
-syntax = "proto3";
+syntax = "proto2";
+
 package random_ordinal_tree;
 
 message adj_list {
