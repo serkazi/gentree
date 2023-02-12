@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 add_subdirectory(utils)
 add_subdirectory(bracket_sequences)
 add_subdirectory(ordinal_trees)
+add_subdirectory(tree_covering)
 
 set(GFLAGS_INCLUDE_DIR /usr/local/include)
 set(GFLAGS_LIBRARY_INSTALL_DIR /usr/local/lib)
