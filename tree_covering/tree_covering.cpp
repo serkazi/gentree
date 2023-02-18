@@ -1,18 +1,16 @@
 //
 //
-
 #include "tree_covering.h"
 
 #include <array>
 #include <cassert>
 #include <map>
-#include <optional>
 #include <set>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 using node_type = int;
-using arc_type = int;
 using size_type = int;
 using arc_t = std::pair<int,int>;
 
@@ -22,14 +20,35 @@ namespace {
 
   enum class Type {
     kTemporary,
-    kPermanent
+    kPermanent,
+    kFinalized
   };
 
   struct Component {
-    bool contains_root = false;
+    node_type root;
+    std::unordered_set<node_type> bag{};
     std::vector<size_type> edge_idx{};
     Type type = Type::kTemporary;
-    std::optional<node_type> root = std::nullopt;
+    size_t size() const {
+      return edge_idx.size();
+    }
+    void add(node_type x) {
+      bag.insert(x);
+    }
+    bool contains(node_type x) const {
+      return bag.count(x) > 0;
+    }
+    void addEdge(size_type idx) {
+      edge_idx.push_back(idx);
+    }
+    Component& operator += (const Component& other) {
+      for (auto x : other.bag) {
+        this->bag.insert(x);
+      }
+      edge_idx.insert(edge_idx.end(), other.edge_idx.begin(),
+                      other.edge_idx.end());
+      return *this;
+    }
   };
 
   class ArcManager {
@@ -68,7 +87,6 @@ namespace {
     std::array<size_type, N> m_card;
     std::array<size_type, N> m_parent;
     std::array<bool, N> m_seen;
-    std::vector<Component> m_permanent_components;
 
     size_type calcCard(node_type x) {
       if (m_seen[x]) {
@@ -85,14 +103,13 @@ namespace {
       return m_card[x];
     }
 
-    // TODO: make this use std::optional
-    std::vector<node_type> childrenOf(node_type x) {
-      std::vector<node_type> children;
+    std::vector<size_type> childrenOf(node_type x) {
+      std::vector<size_type> children;
       for (const auto pr : m_adj[x]) {
         const auto y = m_manager.destinationOf(pr);
         assert(x != y);
         if (m_parent[y] == pr) {
-          children.push_back(y);
+          children.push_back(pr);
         }
       }
       return children;
@@ -101,97 +118,116 @@ namespace {
     static Component singleton(node_type src, Type type) {
       Component cmp;
       cmp.type = type;
-      cmp.contains_root = true;
+      cmp.add(src);
       cmp.root = src;
       return cmp;
     }
 
-    std::vector<Component> caseOne(const node_type src, const std::vector<node_type>& children,
-                                   const std::map<node_type, Component>& temporary,
+    std::vector<Component> caseOne(const node_type src,
+                                   std::vector<std::pair<size_type, Component>> temporary,
                                    const size_t L) {
 
-      if (children.empty()) {
-        return std::vector<Component>{singleton(src, Type::kTemporary)};
+      if (temporary.empty()) {
+        return {singleton(src, Type::kTemporary)};
       }
 
-      std::vector<Component> components;
-      for (int i = 0, j; i < children.size(); i = j) {
-        size_type acc = 0;
-        for (j = i; j < children.size() and acc <= 2*L; ++j) {
-          assert(temporary.count(children[j]));
-          const auto &cmp = temporary.at(children[j]);
-          acc += 1, acc += cmp.edge_idx.size();
+      // Normalize:
+      std::vector<std::pair<size_type, Component>> temp;
+      for (int i = 0, j; i < temporary.size(); i = j) {
+        auto pr = temporary[i];
+        for (j = i+1; j < temporary.size() and temporary[j].first == temporary[i].first; ++j) {
+          pr.second += temporary[j].second;
         }
+        temp.push_back(std::move(pr));
+      }
+      std::swap(temp, temporary);
 
+      std::vector<Component> components;
+      for (int i = 0, j; i < temporary.size(); i = j) {
+        size_type acc = 0;
+        for (j = i; j < temporary.size() and acc <= L; ++j) {
+          acc += 1, acc += temporary[j].second.size();
+        }
         Component c;
-        c.contains_root = true, c.type = Type::kPermanent;
-        c.edge_idx.clear(), c.root = src;
+        c.root = src, c.add(src), c.type = Type::kPermanent;
         for (int k = i; k < j; ++k) {
+          c += temporary[k].second;
           // Add the edge that leads to a child:
-          c.edge_idx.push_back(m_parent[children[k]]);
-          const auto &cmp = temporary.at(children[k]);
-          // TODO: re-write as an overloaded "+=" operator
-          for (auto l = 0; l < cmp.edge_idx.size(); ++l) {
-            c.edge_idx.push_back(cmp.edge_idx[l]);
-          }
+          c.addEdge(temporary[k].first);
         }
         components.push_back(std::move(c));
       }
+      assert(!components.empty());
       if (components.size() == 1) {
           components.back().type = Type::kTemporary;
-          return components;
       }
-      assert(components.size() >= 2);
-      m_permanent_components.insert(m_permanent_components.end(), components.begin(), components.end());
-      return {};
+      return components;
     }
 
     // Each recursive call decomposes a tree rooted at a node
     // and returns component subtrees
     std::vector<Component> decompose(node_type src, const size_type L) {
-      auto children = childrenOf(src);
+      std::vector<Component> result;
 
-      // First, we recursively decompose the trees rooted at the children
-      std::map<node_type, Component> temporary;
-      for (const auto y : children) {
+      // Indices of arcs leading to children:
+      auto children = childrenOf(src);
+      // Find the heavy children
+      std::vector<size_type> heavy_child_idx;
+      std::set<node_type> heavies;
+      for (auto ch : children) {
+        const auto y = m_manager.destinationOf(ch);
+        if (m_card[y] >= L) {
+          heavy_child_idx.push_back(ch);
+          heavies.insert(y);
+        }
+      }
+      // First, we recursively decompose the trees rooted at the children:
+      std::vector<std::pair<size_type, Component>> temporary;
+      for (const auto idx : children) {
+        const auto y = m_manager.destinationOf(idx);
         auto components = decompose(y,L);
         for (auto &c : components) {
-          if (c.contains_root) {
+          // If the component contains the child, we declare it "temporary":
+          if (c.contains(y) and c.type != Type::kFinalized) {
             c.type = Type::kTemporary;
-            temporary[y] = c;
+            temporary.emplace_back(idx, std::move(c));
           } else {
-            c.type = Type::kPermanent;
-            m_permanent_components.push_back(c);
+            // We finalize the components not containing the children
+            // of "src", i.e. the roots of the subtrees:
+            c.type = Type::kFinalized;
+            result.push_back(std::move(c));
           }
         }
       }
 
-      // Find the heavy children
-      std::vector<size_type> heavy_child_idx;
-      for (auto i = 0; i < children.size(); ++i) {
-        if (m_card[children[i]] >= L) {
-          heavy_child_idx.push_back(i);
-        }
-      }
-
       // Case 1: "src" has no heavy children
-      if (heavy_child_idx.empty()) {
-        return caseOne(src, children, temporary, L);
+      if (heavies.empty()) {
+        const auto res = caseOne(src, std::move(temporary), L);
+        result.insert(result.end(), res.begin(), res.end());
+        return result;
       }
 
       // Case 2: "src" has only one heavy child
-      if (heavy_child_idx.size() == 1) {
+      if (heavies.size() == 1) {
         // We proceed analogously to Case 1, except for the situation
         // when the component containing the only heavy child u[i] has been
         // declared permanent. In this case, we simply ignore it and proceed
         // directly from the u[i-1] to u[i+1]
-        const auto heavy_child = children[heavy_child_idx.back()];
-        if (not temporary.count(heavy_child)) {
-          // We simply remove the corresponding child:
-          children.erase(std::remove(children.begin(), children.end(), heavy_child),
-                        children.end());
+        const auto idx = *(heavy_child_idx.begin());
+        auto filtr = [idx](const auto& pr) {
+          return pr.first == idx;
+        };
+        auto it = std::find_if(temporary.begin(), temporary.end(), filtr);
+        if (it != temporary.end()) {
+          if (it->second.type == Type::kPermanent || it->second.type == Type::kFinalized) {
+            temporary.erase(std::remove_if(temporary.begin(), temporary.end(), filtr),
+                            temporary.end());
+          }
         }
-        return caseOne(src, children, temporary, L);
+
+        const auto res = caseOne(src, std::move(temporary), L);
+        result.insert(result.end(), res.begin(), res.end());
+        return result;
       }
 
       // Case 3: Node "src" is a branching node.
@@ -202,57 +238,41 @@ namespace {
       // becomes a permanent singleton component. Otherwise, we process
       // each of the remaining ranges as in Case 1.
 
-      std::set<node_type> heavies;
-      for (auto hv : heavy_child_idx) {
-        heavies.insert(children[hv]);
-      }
       assert(heavies.size() >= 2);
       // First, we declare permanent all the components containing the heavy nodes:
-      // Note: Since "m_permanent" is being populated directly from the method,
-      // we need to walk only through the "temporary" map:
-      std::set<node_type> excluded;
-      for (auto &[a,b] : temporary) {
-        if (heavies.count(a)) {
-          assert(b.type == Type::kTemporary);
+      for (auto &[idx,b] : temporary) {
+        const auto y = m_manager.destinationOf(idx);
+        if (heavies.count(y)) {
           b.type = Type::kPermanent;
-          excluded.insert(a);
-          m_permanent_components.push_back(b);
+          result.push_back(b);
         }
-      }
-      for (auto x : excluded) {
-        auto ok = temporary.erase(x);
-        assert(ok);
       }
 
       // If in fact all the children left were heavy, "src" is by itself
       // is a permanent single-node component:
       if (children.size() == heavies.size()) {
-        m_permanent_components.push_back(singleton(src, Type::kPermanent));
-        return {};
+        result.push_back(singleton(src, Type::kPermanent));
+        return result;
       }
 
+      auto fltr = [this, &heavies](const auto& pr) {
+        return heavies.count(this->m_manager.destinationOf(pr.first)) > 0;
+      };
       // Otherwise, the remaining children of "src" are broken by the heavy
       // nodes into intervals of consecutive non-heavy nodes:
-      std::vector<std::vector<node_type>> ranges;
-      for(int i = 0, j; i < children.size(); i = j) {
+      for(int i = 0, j; i < temporary.size(); i = j) {
         int k = i;
-        for (;k < children.size() and heavies.count(children[k]); ++k);
-        for (j = k; j < children.size() and not heavies.count(children[j]); ++j);
-        std::vector<node_type> rng;
+        for (;k < temporary.size() and fltr(temporary[k]); ++k);
+        for (j = k; j < temporary.size() and !fltr(temporary[j]); ++j);
         // "children[j]" is a heavy child, hence we do not include it:
-        for (;k < j; ++k) {
-          rng.push_back(children[k]);
-        }
+        std::vector<std::pair<size_type, Component>> rng(temporary.begin()+k, temporary.begin()+j);
         if (!rng.empty()) {
-          ranges.push_back(std::move(rng));
+          auto ret = caseOne(src, std::move(rng), L);
+          for (auto &cmp : ret) {
+            cmp.type = Type::kFinalized;
+          }
+          result.insert(result.end(), ret.begin(), ret.end());
         }
-      }
-
-      // We consider each interval separately, treating each as in Case 1:
-      std::vector<Component> result;
-      for (const auto &r : ranges) {
-        const auto ret = caseOne(src, r, temporary, L);
-        result.insert(result.end(), ret.begin(), ret.end());
       }
 
       return result;
@@ -282,23 +302,18 @@ namespace {
     }
 
     void print(std::ostream& os, const size_t L) override {
-      m_permanent_components.clear();
-      auto res = decompose(0,L);
-      if (!res.empty()) {
-        m_permanent_components.insert(m_permanent_components.end(),
-                                      res.begin(), res.end());
-      }
+      const auto components = decompose(0, L);
       int component = 0;
-      for (const auto &c : m_permanent_components) {
+      for (const auto &c : components) {
         os << "[Component No] " << ++component << '\n';
-        if (c.root) {
-          os << "Single-node cluster: " << 1 + *(c.root) << '\n';
+        if (c.size() == 0) {
+          os << "Single-node cluster: " << 1 + (c.root) << '\n';
           continue;
         }
         for (auto idx : c.edge_idx) {
           const auto x = m_manager.sourceOf(idx);
           const auto y = m_manager.destinationOf(idx);
-          os << x+1 << "->" << y+1 << '\n';
+          os << (x+1) << "->" << (y+1) << '\n';
         }
       }
     }
