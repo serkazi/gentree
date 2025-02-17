@@ -15,6 +15,7 @@ set(GFLAGS_LIBRARY_INSTALL_DIR /usr/local/lib)
 find_package(gflags REQUIRED HINTS /usr/local/)
 
 find_package(Protobuf REQUIRED)
+message(INFO "Probuf: " ${PROTO_HDRS})
 include_directories(${Protobuf_INCLUDE_DIRS})
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ipc/ordinal_tree.proto)
