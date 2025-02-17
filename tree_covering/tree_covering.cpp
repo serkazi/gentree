@@ -2,6 +2,7 @@
 //
 #include "tree_covering.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <map>

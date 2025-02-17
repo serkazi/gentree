@@ -9,9 +9,6 @@ add_subdirectory(bracket_sequences)
 add_subdirectory(ordinal_trees)
 add_subdirectory(tree_covering)
 
-set(GFLAGS_INCLUDE_DIR /usr/local/include)
-set(GFLAGS_LIBRARY_INSTALL_DIR /usr/local/lib)
-
 find_package(gflags REQUIRED HINTS /usr/local/)
 
 find_package(Protobuf REQUIRED)

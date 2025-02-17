@@ -68,7 +68,8 @@ void convert(const std::string& s, random_ordinal_tree::ordinal_tree& tree) {
 }
 
 int main(int argc, char **argv) {
-  gflags::ParseCommandLineFlags(&argc,&argv,true);
+  gflags::SetUsageMessage("Usage: otree -n <num of nodes> -d <0-or 1-based> -output <output-path> -a <weights-lower> -b <weights-upper>");
+  gflags::ParseCommandLineFlags(&argc,&argv,/*remove_flags=*/true);
 
   auto requested = FLAGS_n;
   std::unique_ptr<IRandomOrdinalTree> rand_tree = std::make_unique<RandOrdinalTreeFromBinary>(requested);
